@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XML and JSON Tree Viewer</title>
+    <link rel="icon" href="favicon/favicon.ico" type="image/x-icon">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="favicon/apple-touch-icon.png">
+    <link rel="manifest" href="favicon/site.webmanifest">
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/jstree.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/x2js/1.2.0/xml2json.min.js"></script>
+</head>
+
+<body>
+    <!-- Tab navigation for XML and JSON views -->
+    <h1>XML and JSON Tree Viewer</h1>
+    <div class="tab">
+        <button class="tablinks active" onclick="openTab(event, 'xmlTab')">XML</button>
+        <button class="tablinks" onclick="openTab(event, 'jsonTab')">JSON</button>
+    </div>
+
+    <!-- XML Tab Content -->
+    <div id="xmlTab" class="tab-content active">
+        <h3>Load XML File</h3>
+        <input type="file" id="xmlFile" accept=".xml" />
+        <h3>Paste XML</h3>
+        <textarea id="xmlText" rows="10" placeholder="Paste your XML here..."></textarea>
+        <button onclick="parseXML()">See Tree View</button>
+    </div>
+
+    <!-- JSON Tab Content -->
+    <div id="jsonTab" class="tab-content">
+        <h3>Load JSON File</h3>
+        <input type="file" id="jsonFile" accept=".json" />
+        <h3>Paste JSON</h3>
+        <textarea id="jsonText" rows="10" placeholder="Paste your JSON here..."></textarea>
+        <button onclick="parseJSON()">See Tree View</button>
+    </div>
+
+    <!-- Tree View Section -->
+    <h3 id="treeViewTitle">Tree View</h3>
+    <div style="text-align: center;">
+        <button id="openAll" onclick="$('#treeView').jstree('open_all')">Open All</button>
+        <button id="closeAll" onclick="$('#treeView').jstree('close_all')">Close All</button>
+    </div>
+    <div id="treeView"></div>
+
+    <script>
+        // Cache to store tree data for both tabs
+        const treeDataCache = { xmlTab: null, jsonTab: null };
+
+        // Switch between XML and JSON tabs
+        function openTab(evt, tabName) {
+            const currentTab = $('.tab-content.active').attr('id');
+
+            // Save current tree state before switching tabs
+            if (currentTab && $('#treeView').jstree(true)) {
+                saveTreeState(currentTab);
+            }
+
+            // Update active tab and button styles
+            $('.tab-content, .tablinks').removeClass('active');
+            $('#' + tabName).addClass('active');
+            $(evt.currentTarget).addClass('active');
+
+            // Restore previous tree data if available
+            if (treeDataCache[tabName]) {
+                displayTree(treeDataCache[tabName]);
+                setTimeout(() => {
+                    restoreTreeState(tabName);
+                }, 100); // delay to make sure tree is rendered
+            } else {
+                /// Clear tree if no data is available
+                if ($('#treeView').jstree(true)) {
+                    $('#treeView').jstree('destroy').empty();
+                }
+                $('#treeView, #treeViewTitle, #openAll, #closeAll').hide();
+            }
+        }
+
+        // Handle XML file upload
+        $('#xmlFile').on('change', function (event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    $('#xmlText').val(e.target.result);
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Handle JSON file upload
+        $('#jsonFile').on('change', function (event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    $('#jsonText').val(e.target.result);
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Parse XML content and display in tree view
+        function parseXML() {
+            const fileInput = document.getElementById('xmlFile');
+            const xmlText = document.getElementById('xmlText').value;
+
+            if (xmlText.trim()) {
+                processXML(xmlText);
+            } else if (fileInput.files.length > 0) {
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    processXML(event.target.result);
+                };
+                reader.readAsText(fileInput.files[0]);
+            } else {
+                alert('Please load an XML file or paste XML content.');
+            }
+
+        }
+
+        // Process XML and convert it to a JSON tree
+        function processXML(xmlContent) {
+            try {
+                // Clear previous tree data if available
+                if ($('#treeView').jstree(true)) {
+                    $('#treeView').jstree('destroy');
+                }
+                $('#treeView').empty();
+
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlContent, "application/xml");
+
+                // Extract comments from XML
+                const comments = [];
+                const walker = document.createTreeWalker(xmlDoc, NodeFilter.SHOW_COMMENT, null, false);
+                while (walker.nextNode()) {
+                    const commentNode = walker.currentNode;
+                    comments.push({
+                        parentPath: getNodePath(commentNode.parentNode),
+                        comment: commentNode.nodeValue.trim()
+                    });
+                }
+
+                // Convert XML to JSON using X2JS
+                const x2js = new X2JS();
+                const jsonObj = x2js.xml_str2json(xmlContent);
+                if (!jsonObj) throw new Error('Invalid XML format.');
+
+                // Add comments to the JSON structure
+                comments.forEach(comment => {
+                    const target = getNodeFromPath(jsonObj, comment.parentPath);
+                    if (!target.__comments) target.__comments = [];
+                    target.__comments.push(comment.comment);
+                });
+
+                // Convert JSON to a tree structure and display it
+                const treeData = convertXMLToTree(jsonObj);
+                $('#treeView').jstree({ core: { data: treeData } });
+
+                treeDataCache.xmlTab = treeData;
+                displayTree(treeData);
+            } catch (error) {
+                alert('Error parsing XML: ' + error.message);
+            }
+        }
+
+
+
+        // Get the full path of a node to associate its comment
+        function getNodePath(node) {
+            if (!node || node.nodeType !== 1) return '';
+            const parentPath = getNodePath(node.parentNode);
+            return `${parentPath}/${node.nodeName}`;
+        }
+
+        // Find the corresponding JSON node based on the path
+        function getNodeFromPath(obj, path) {
+            const parts = path.split('/').filter(p => p);
+            let current = obj;
+            for (const part of parts) {
+                if (current[part]) {
+                    current = current[part];
+                }
+            }
+            return current;
+        }
+
+        function convertXMLToTree(obj) {
+            if (!obj || typeof obj !== 'object') return [];
+
+            return Object.keys(obj).map(key => {
+                const value = obj[key];
+                const formattedKey = formatValue(`<b>${key}</b>`, true); // Apply black for keys
+
+                // Display comments if they exist
+                if (key === '__comments') {
+                    return value.map(comment => {
+                        const formattedComment = formatValue(`Comment: ${comment}`);
+                        return {
+                            text: formattedComment.text,
+                            icon: "comment",
+                            a_attr: formattedComment.a_attr
+                        };
+                    });
+                }
+
+                // Ignore irrelevant properties
+                if (key === 'toString' || key === '__text' || key === '__cdata') {
+                    return null;
+                }
+
+                // Handle attributes that start with "_"
+                if (key.startsWith('_')) {
+                    const formattedAttribute = formatValue(`${key.substring(1)}: ${value}`);
+                    return {
+                        text: formattedAttribute.text,
+                        a_attr: formattedAttribute.a_attr
+                    };
+                }
+
+                // Handle arrays
+                if (Array.isArray(value)) {
+                    return value.map((item, index) => {
+                        if (typeof item === 'object' && !Array.isArray(item)) {
+                            return {
+                                text: formattedKey.text,
+                                a_attr: formattedKey.a_attr,
+                                children: convertXMLToTree(item)
+                            };
+                        } else {
+                            const formattedItem = formatValue(item);
+                            return {
+                                text: `${formattedKey.text} [${index}]: ${formattedItem.text}`,
+                                a_attr: formattedItem.a_attr
+                            };
+                        }
+                    });
+                }
+
+                // Create a base node
+                const node = { text: formattedKey.text, a_attr: formattedKey.a_attr };
+
+                // Handle objects
+                if (typeof value === 'object' && value !== null) {
+                    const content = [];
+                    if (value.__text) content.push(value.__text);
+                    if (value.__cdata) content.push(`(CDATA: ${value.__cdata})`);
+                    if (content.length) {
+                        const formattedContent = formatValue(content.join(' '));
+                        node.text += `: ${formattedContent.text}`;
+                        node.a_attr = formattedContent.a_attr;
+                    }
+                    node.children = convertXMLToTree(value);
+                } else {
+                    const formattedValue = formatValue(value);
+                    node.text += `: ${formattedValue.text}`;
+                    node.a_attr = formattedValue.a_attr;
+                }
+
+                return node;
+            }).filter(Boolean).flat();
+        }
+
+
+        // Function to parse JSON from text input or a file
+        function parseJSON() {
+            const fileInput = document.getElementById('jsonFile');
+            const jsonText = document.getElementById('jsonText').value;
+
+            // Clear JSON cache for the JSON tab
+            treeDataCache.jsonTab = null;
+
+            // If JSON is provided in the text area, process it
+            if (jsonText.trim()) {
+                processJSON(jsonText);
+            }
+            // If a file is uploaded, read and process it
+            else if (fileInput.files.length > 0) {
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    processJSON(event.target.result);
+                };
+                reader.readAsText(fileInput.files[0]);
+            }
+            // Show an alert if no JSON data is provided
+            else {
+                alert('Please load a JSON file or paste JSON content.');
+            }
+
+        }
+
+        // Function to process and display the parsed JSON data
+        function processJSON(jsonContent) {
+            try {
+                // Clear JSON cache again to ensure fresh data
+                treeDataCache.jsonTab = null;
+
+                // Destroy the previous tree if it exists
+                if ($('#treeView').jstree(true)) {
+                    $('#treeView').jstree('destroy');
+                }
+                $('#treeView').empty();
+
+                // Parse JSON content
+                const jsonObj = JSON.parse(jsonContent);
+                if (!jsonObj) throw new Error('Invalid JSON format.');
+
+                // Convert JSON to tree structure
+                const treeData = convertJSONToTree(jsonObj);
+                $('#treeView').jstree({ core: { data: treeData } });
+
+                // Cache the tree data for further use
+                treeDataCache.jsonTab = treeData;
+
+                // Display the tree on the UI
+                displayTree(treeData);
+            } catch (error) {
+                alert('Error parsing JSON: ' + error.message);
+            }
+        }
+
+        // Function to convert JSON object into a tree data structure for rendering
+        function convertJSONToTree(obj) {
+            if (!obj || typeof obj !== 'object') return [];
+
+            return Object.keys(obj).map(key => {
+                const value = obj[key];
+                const formattedKey = formatValue(`<b>${key}</b>`, true); // Apply black for keys
+
+                const node = { text: formattedKey.text, a_attr: formattedKey.a_attr };
+
+                // Handle arrays within the JSON
+                if (Array.isArray(value)) {
+                    const formattedArrayKey = formatValue(`<b>${key} []</b>`, true);
+                    node.text = formattedArrayKey.text;
+                    node.a_attr = formattedArrayKey.a_attr;
+
+                    // Convert array items into child nodes
+                    node.children = value.map((item, index) => {
+                        const formattedItem = formatValue(item);
+                        const childNode = { text: formattedItem.text, a_attr: formattedItem.a_attr };
+
+                        // If array contains objects, recursively convert them
+                        if (typeof item === 'object') {
+                            const formattedIndex = formatValue(`${index} {}`, true);
+                            childNode.text = formattedIndex.text;
+                            childNode.a_attr = formattedIndex.a_attr;
+                            childNode.children = convertJSONToTree(item);
+                        }
+                        return childNode;
+                    });
+                }
+                // Handle nested objects
+                else if (typeof value === 'object' && value !== null) {
+                    const formattedObjectKey = formatValue(`<b>${key} {}`, true);
+                    node.text = formattedObjectKey.text;
+                    node.a_attr = formattedObjectKey.a_attr;
+                    node.children = convertJSONToTree(value);
+                }
+                // Handle simple key-value pairs
+                else {
+                    const formattedValue = formatValue(JSON.stringify(value));
+                    node.text += `: ${formattedValue.text}`;
+                    node.a_attr = formattedValue.a_attr;
+                }
+
+                return node;
+            });
+        }
+
+        // Function to format JSON keys and values with appropriate styles
+        function formatValue(val, isKey = false) {
+            const fontFamily = '"Roboto Condensed", Helvetica, Arial, sans-serif';
+
+            if (isKey) {
+                // Keep keys black
+                return { text: `<b style="color:#000000; font-family: ${fontFamily};">${val}</b>`, a_attr: {} };
+            } else {
+                let color = '#757171'; // Default gray for strings
+
+                if (val === null || val === 'null') {
+                    color = '#D0D0D0'; // Very Light Gray for null
+                    val = 'null';
+                } else if (!isNaN(val) && val.trim() !== '') {
+                    color = '#4A90E2'; // Soft Blue for numbers
+                } else if (val === 'true' || val === 'false') {
+                    color = '#E94E4E'; // Soft Red for booleans
+                } else if (isValidDate(val)) {
+                    color = '#4CAF50'; // Soft Green for dates
+                }
+
+                return { text: `<span style="color:${color}; font-family: ${fontFamily};">${val}</span>`, a_attr: {} };
+            }
+        }
+
+        // Function to validate if the string is a date
+        function isValidDate(dateString) {
+            const dateRegex = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|([+-]\d{2}:\d{2}))?)?$/;
+            return dateRegex.test(dateString);
+        }
+
+        // Function to display the tree data using jsTree
+        function displayTree(data) {
+            // Destroy previous tree if it exists
+            if ($('#treeView').jstree(true)) {
+                $('#treeView').jstree('destroy').empty();
+            }
+            // Display the tree with a slight delay to ensure smooth rendering
+            setTimeout(() => {
+                $('#treeView').jstree({
+                    core: { data: data, check_callback: true },
+                    plugins: ["html_data"]
+                });
+                $('#treeView, #treeViewTitle, #openAll, #closeAll').show();
+            }, 50);
+        }
+
+        // Function to save the current tree state for a given tab
+        function saveTreeState(tabName) {
+            const treeInstance = $('#treeView').jstree(true);
+            if (treeInstance) {
+                treeDataCache[`${tabName}_state`] = treeInstance.get_state();
+            }
+        }
+
+        // Function to restore the previously saved tree state for a given tab
+        function restoreTreeState(tabName) {
+            const treeInstance = $('#treeView').jstree(true);
+            const savedState = treeDataCache[`${tabName}_state`];
+            if (treeInstance && savedState) {
+                $('#treeView').on('refresh.jstree', function () {
+                    treeInstance.set_state(savedState);
+                    $('#treeView').off('refresh.jstree'); // Prevent multiple calls
+                });
+                treeInstance.refresh(); // Force tree refresh to apply state
+            }
+        }
+
+        $(document).ready(hideTreeView);
+    </script>
+</body>
+
+</html>
