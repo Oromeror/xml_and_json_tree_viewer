@@ -45,11 +45,12 @@
 
     <!-- Tree View Section -->
     <h3 id="treeViewTitle">Tree View</h3>
-    <div style="text-align: center;">
+    <div class="tree-buttons">
         <button id="openAll" onclick="$('#treeView').jstree('open_all')">Open All</button>
         <button id="closeAll" onclick="$('#treeView').jstree('close_all')">Close All</button>
     </div>
-    <div id="treeView"></div>
+
+    <div id="treeView" class="tree-content"></div>
 
     <script>
         // Cache to store tree data for both tabs
